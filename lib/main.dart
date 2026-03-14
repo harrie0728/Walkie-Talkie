@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'services/pi_service.dart';
 
 void main() {
   runApp(const WalkieTalkieApp());
@@ -25,33 +26,33 @@ class RadioScreen extends StatefulWidget {
 }
 
 class _RadioScreenState extends State<RadioScreen> {
+  final PiService piService = PiService();
   int currentChannel = 1;
   bool isTransmitting = false;
 
-  // This formats our standard number (1) into the digital style ("00:01")
-  String get formattedChannel {
-    return "00:0$currentChannel";
+  @override
+  void initState() {
+    super.initState();
+    piService.connect();
+  }
+  
+  @override
+  void dispose() {
+    piService.dispose();
+    super.dispose();
   }
 
-  // Logic for the Right Arrow
+  String get formattedChannel => "00:0$currentChannel";
+
   void nextChannel() {
     setState(() {
-      if (currentChannel < 4) {
-        currentChannel++;
-      } else {
-        currentChannel = 1; // Loop back to 1
-      }
+      currentChannel = currentChannel < 4 ? currentChannel + 1 : 1;
     });
   }
 
-  // Logic for the Left Arrow
   void previousChannel() {
     setState(() {
-      if (currentChannel > 1) {
-        currentChannel--;
-      } else {
-        currentChannel = 4; // Loop back to 4
-      }
+      currentChannel = currentChannel > 1 ? currentChannel - 1 : 4;
     });
   }
 
@@ -62,12 +63,41 @@ class _RadioScreenState extends State<RadioScreen> {
       appBar: AppBar(
         title: const Text('My Radio'),
         backgroundColor: Colors.black,
+        // NEW: Live connection status indicator in the top right corner
+        actions: [
+          ValueListenableBuilder<bool>(
+            valueListenable: piService.isConnected,
+            builder: (context, isConnected, child) {
+              return Padding(
+                padding: const EdgeInsets.only(right: 16.0),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.circle,
+                      color: isConnected ? Colors.greenAccent : Colors.redAccent,
+                      size: 12,
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      isConnected ? 'CONNECTED' : 'DISCONNECTED',
+                      style: TextStyle(
+                        color: isConnected ? Colors.greenAccent : Colors.redAccent,
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 1,
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
+        ],
       ),
       body: Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            // --- NEW: Digital Frequency Display ---
             const Text(
               "FREQUENCY",
               style: TextStyle(
@@ -80,19 +110,16 @@ class _RadioScreenState extends State<RadioScreen> {
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                // Left Arrow Button
                 IconButton(
                   icon: const Icon(Icons.arrow_back_ios),
                   color: Colors.blueAccent,
                   iconSize: 35,
                   onPressed: previousChannel,
                 ),
-                
                 const SizedBox(width: 15),
-                
-                // The LCD-style Screen
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 25, vertical: 15),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 25, vertical: 15),
                   decoration: BoxDecoration(
                     color: Colors.black,
                     borderRadius: BorderRadius.circular(10),
@@ -103,22 +130,19 @@ class _RadioScreenState extends State<RadioScreen> {
                         blurRadius: 10,
                         spreadRadius: 2,
                       )
-                    ]
+                    ],
                   ),
                   child: Text(
                     formattedChannel,
                     style: const TextStyle(
-                      color: Colors.greenAccent, // Gives it that classic digital glow
+                      color: Colors.greenAccent,
                       fontSize: 40,
                       fontWeight: FontWeight.bold,
-                      fontFamily: 'MyDigitalFont', // Monospace font for a hardware look
+                      fontFamily: 'MyDigitalFont',
                     ),
                   ),
                 ),
-                
                 const SizedBox(width: 15),
-                
-                // Right Arrow Button
                 IconButton(
                   icon: const Icon(Icons.arrow_forward_ios),
                   color: Colors.blueAccent,
@@ -127,11 +151,7 @@ class _RadioScreenState extends State<RadioScreen> {
                 ),
               ],
             ),
-            // --------------------------------------
-
-            const SizedBox(height: 80), // Increased spacing
-
-            // Status Text
+            const SizedBox(height: 80),
             Text(
               isTransmitting ? "TRANSMITTING..." : "STANDBY",
               style: TextStyle(
@@ -140,21 +160,37 @@ class _RadioScreenState extends State<RadioScreen> {
                 color: isTransmitting ? Colors.red : Colors.green,
               ),
             ),
-            
             const SizedBox(height: 30),
-            
-            // The Push to Talk Button
             GestureDetector(
-              onTapDown: (details) {
+              onTapDown: (details) async {
+                // Prevent transmitting if we aren't connected
+                if (!piService.isConnected.value) {
+                  print("Cannot transmit: Not connected to Pi");
+                  return; 
+                }
+                
+                await piService.startTransmit();
                 setState(() {
                   isTransmitting = true;
                 });
                 print("Transmitting on Frequency $formattedChannel");
               },
-              onTapUp: (details) {
-                setState(() {
-                  isTransmitting = false;
-                });
+              onTapUp: (details) async {
+                if (isTransmitting) {
+                  await piService.stopTransmit();
+                  setState(() {
+                    isTransmitting = false;
+                  });
+                }
+              },
+              onTapCancel: () async {
+                // Safety catch just in case the finger slides off the button
+                if (isTransmitting) {
+                  await piService.stopTransmit();
+                  setState(() {
+                    isTransmitting = false;
+                  });
+                }
               },
               child: Container(
                 width: 200,
